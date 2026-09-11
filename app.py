@@ -1,28 +1,31 @@
 import streamlit as st
 import random
-import json
-import os
 
 # ============================================================
-# LUDO KING-STYLE GAME  —  built with a rotationally-symmetric
-# board model so all four arms are guaranteed to line up.
+# LUDO MASTER — compact, single-screen UI + setup wizard
 # ============================================================
 
 st.set_page_config(page_title="Ludo Master", page_icon="🎲", layout="centered")
 
+st.markdown(
+    """
+    <style>
+    .block-container {padding-top: 1rem; padding-bottom: 0.5rem; max-width: 460px;}
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    div[data-testid="stVerticalBlock"] > div:has(> div.stButton) {margin-bottom: -0.6rem;}
+    .stButton>button {padding: 0.35rem 0.6rem;}
+    h1 {font-size: 1.6rem !important; margin-bottom: 0.2rem !important;}
+    h3 {margin-top: 0.2rem !important; margin-bottom: 0.2rem !important;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 COLORS = ["red", "green", "yellow", "blue"]
-HEX = {
-    "red": "#E53935",
-    "green": "#43A047",
-    "yellow": "#FDD835",
-    "blue": "#1E88E5",
-}
-DARK_HEX = {
-    "red": "#8E1E1A",
-    "green": "#245C2A",
-    "yellow": "#9C8A10",
-    "blue": "#0F4C86",
-}
+HEX = {"red": "#E53935", "green": "#43A047", "yellow": "#FDD835", "blue": "#1E88E5"}
+DARK_HEX = {"red": "#8E1E1A", "green": "#245C2A", "yellow": "#9C8A10", "blue": "#0F4C86"}
+TEAM_OF = {"red": "A", "yellow": "A", "green": "B", "blue": "B"}
 
 DICE_SKINS = {
     "Classic White": {"bg": "#FFFFFF", "pip": "#111111", "border": "#333333"},
@@ -33,12 +36,11 @@ DICE_SKINS = {
     "Emerald": {"bg": "#2E7D32", "pip": "#FFFFFF", "border": "#154B18"},
 }
 
-TEAM_OF = {"red": "A", "yellow": "A", "green": "B", "blue": "B"}
+TOKEN_SHAPES = ["Pin", "Disc", "Diamond", "Star"]
 
 # ---------------- board geometry (built once, symmetrically) ----------------
 
 def rotate(cell):
-    """Rotate a (row,col) 90 deg clockwise around the board center (7,7)."""
     r, c = cell
     return (7 + (c - 7), 7 - (r - 7))
 
@@ -48,7 +50,6 @@ RED_QUARTER = [
     (5, 6), (4, 6), (3, 6), (2, 6), (1, 6), (0, 6),
     (0, 7), (0, 8),
 ]
-
 RED_HOME_COL = [(7, 1), (7, 2), (7, 3), (7, 4), (7, 5), (7, 6)]
 
 QUARTERS = {"red": RED_QUARTER}
@@ -70,14 +71,15 @@ BASE_SLOTS = {
     "yellow": [(10, 10), (10, 13), (13, 10), (13, 13)],
     "blue":   [(10, 1), (10, 4), (13, 1), (13, 4)],
 }
-
 CENTER = (7, 7)
+FINISH_POS = 58
 
-FINISH_POS = 58  # token position value meaning "home / finished"
+TWO_PLAYER_COLORS = ["red", "yellow"]
+THREE_PLAYER_COLORS = ["red", "green", "yellow"]
+FOUR_PLAYER_COLORS = ["red", "green", "yellow", "blue"]
 
 
 def cell_of(color, pos, token_idx):
-    """Return (row,col) board cell for a token at logical position `pos`."""
     if pos == -1:
         return BASE_SLOTS[color][token_idx]
     if pos == FINISH_POS:
@@ -85,14 +87,7 @@ def cell_of(color, pos, token_idx):
     if pos <= 51:
         gi = (START_INDEX[color] + pos) % 52
         return GLOBAL_CELLS[gi]
-    # home column, pos 52..57
     return HOME_COLS[color][pos - 52]
-
-
-def is_safe_pos(pos):
-    if pos == -1 or pos >= 52:
-        return True
-    return pos in {(g - 0) for g in range(0)}  # placeholder, replaced below
 
 
 def global_index_safe(pos, color):
@@ -104,37 +99,25 @@ def global_index_safe(pos, color):
 
 # ---------------- game state ----------------
 
-def fresh_state(colors_in_play, human_flags, mode):
-    positions = {c: [-1, -1, -1, -1] for c in COLORS}
-    return {
-        "mode": mode,                     # "computer" | "local" | "team"
-        "colors": colors_in_play,         # list of colors actually playing
-        "is_human": human_flags,          # dict color -> bool
-        "positions": positions,
+def start_new_game(mode, colors_in_play, names, is_human, dice_skin, token_shape, commentary_on, groq_key):
+    st.session_state.game = {
+        "mode": mode,
+        "colors": colors_in_play,
+        "names": names,
+        "is_human": is_human,
+        "positions": {c: [-1, -1, -1, -1] for c in COLORS},
         "turn_idx": 0,
         "dice": None,
         "movable": [],
         "consecutive_sixes": 0,
-        "log": ["Game started. " + colors_in_play[0].capitalize() + " goes first."],
+        "log": [f"Game started. {names[colors_in_play[0]]} ({colors_in_play[0]}) goes first."],
         "winner": None,
-        "extra_turn": False,
     }
-
-
-def start_new_game(mode, num_local_players, dice_skin, commentary_on):
-    if mode == "computer":
-        colors_in_play = ["red", "green", "yellow", "blue"]
-        is_human = {"red": True, "green": False, "yellow": False, "blue": False}
-    elif mode == "team":
-        colors_in_play = ["red", "green", "yellow", "blue"]
-        is_human = {c: True for c in colors_in_play}
-    else:  # local pass & play
-        colors_in_play = COLORS[:num_local_players]
-        is_human = {c: True for c in colors_in_play}
-
-    st.session_state.game = fresh_state(colors_in_play, is_human, mode)
     st.session_state.dice_skin = dice_skin
+    st.session_state.token_shape = token_shape
     st.session_state.commentary_on = commentary_on
+    st.session_state.groq_key = groq_key
+    st.session_state.stage = "playing"
 
 
 def current_color():
@@ -154,24 +137,19 @@ def next_turn(give_extra=False):
     g["consecutive_sixes"] = 0
 
 
-def team_mates(color):
-    team = TEAM_OF[color]
-    return [c for c in COLORS if TEAM_OF[c] == team]
-
-
 def check_winner():
     g = st.session_state.game
     if g["mode"] == "team":
         for team in ["A", "B"]:
             members = [c for c in COLORS if TEAM_OF[c] == team]
             if all(all(p == FINISH_POS for p in g["positions"][m]) for m in members):
-                return "Team " + team + " (" + " & ".join(members).title() + ")"
+                names = " & ".join(g["names"][m] for m in members)
+                return f"Team {team} ({names})"
         return None
-    else:
-        for c in g["colors"]:
-            if all(p == FINISH_POS for p in g["positions"][c]):
-                return c.capitalize()
-        return None
+    for c in g["colors"]:
+        if all(p == FINISH_POS for p in g["positions"][c]):
+            return g["names"][c]
+    return None
 
 
 def movable_tokens(color, dice_val):
@@ -194,17 +172,12 @@ def apply_move(color, token_idx, dice_val):
     g = st.session_state.game
     positions = g["positions"][color]
     p = positions[token_idx]
-    if p == -1:
-        new_p = 0
-    else:
-        new_p = p + dice_val
+    new_p = 0 if p == -1 else p + dice_val
     positions[token_idx] = new_p
 
-    msg = f"{color.capitalize()} moved a token to " + \
-          ("HOME! 🏆" if new_p == FINISH_POS else f"position {new_p}.")
-
+    name = g["names"][color]
+    msg = f"{name} moved to " + ("HOME! 🏆" if new_p == FINISH_POS else f"pos {new_p}.")
     captured = False
-    # capture check only on shared track, not safe squares, not home column
     if new_p <= 51 and not global_index_safe(new_p, color):
         gi_new = (START_INDEX[color] + new_p) % 52
         for other in g["colors"]:
@@ -215,18 +188,15 @@ def apply_move(color, token_idx, dice_val):
             for j, op in enumerate(g["positions"][other]):
                 if op == -1 or op == FINISH_POS or op > 51:
                     continue
-                gi_other = (START_INDEX[other] + op) % 52
-                if gi_other == gi_new:
+                if (START_INDEX[other] + op) % 52 == gi_new:
                     g["positions"][other][j] = -1
                     captured = True
-                    msg += f" Captured {other.capitalize()}'s token — sent home!"
-
+                    msg += f" Captured {g['names'][other]}'s token!"
     g["log"].insert(0, msg)
-    return new_p == FINISH_POS or captured  # earns extra turn
+    return new_p == FINISH_POS or captured
 
 
 def ai_choose_token(color, dice_val, movable):
-    """Simple heuristic AI: prefer capture > exit base > furthest token."""
     g = st.session_state.game
     positions = g["positions"][color]
 
@@ -240,10 +210,8 @@ def ai_choose_token(color, dice_val, movable):
             if other == color or TEAM_OF.get(other) == TEAM_OF.get(color):
                 continue
             for op in g["positions"][other]:
-                if op != -1 and op <= 51:
-                    gi_other = (START_INDEX[other] + op) % 52
-                    if gi_other == gi_new:
-                        return True
+                if op != -1 and op <= 51 and (START_INDEX[other] + op) % 52 == gi_new:
+                    return True
         return False
 
     capturing = [i for i in movable if would_capture(i)]
@@ -251,11 +219,8 @@ def ai_choose_token(color, dice_val, movable):
         return capturing[0]
     if dice_val == 6 and any(positions[i] == -1 for i in movable):
         return next(i for i in movable if positions[i] == -1)
-    # otherwise move the token that is furthest along
     return max(movable, key=lambda i: positions[i])
 
-
-# ---------------- optional Groq commentary ----------------
 
 def get_groq_commentary(log_line, api_key):
     try:
@@ -266,9 +231,7 @@ def get_groq_commentary(log_line, api_key):
             json={
                 "model": "llama-3.1-8b-instant",
                 "messages": [
-                    {"role": "system", "content": "You are a hype sports commentator for a Ludo board game. "
-                                                   "React to the move in ONE short punchy sentence (max 15 words). "
-                                                   "No emojis besides at most one."},
+                    {"role": "system", "content": "Hype sports commentator for Ludo. One short punchy sentence, max 15 words, at most one emoji."},
                     {"role": "user", "content": log_line},
                 ],
                 "max_tokens": 40,
@@ -285,53 +248,57 @@ def get_groq_commentary(log_line, api_key):
 
 # ---------------- SVG rendering ----------------
 
-def svg_board(size=480):
+def token_shape_svg(shape, cx, cy, r, fill, stroke):
+    if shape == "Disc":
+        return f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="{fill}" stroke="{stroke}" stroke-width="2"/>'
+    if shape == "Diamond":
+        pts = f"{cx},{cy-r*1.3} {cx+r*1.1},{cy} {cx},{cy+r*1.3} {cx-r*1.1},{cy}"
+        return f'<polygon points="{pts}" fill="{fill}" stroke="{stroke}" stroke-width="2"/>'
+    if shape == "Star":
+        import math
+        pts = []
+        for i in range(10):
+            ang = math.pi / 5 * i - math.pi / 2
+            rad = r * 1.3 if i % 2 == 0 else r * 0.55
+            pts.append(f"{cx+rad*math.cos(ang)},{cy+rad*math.sin(ang)}")
+        return f'<polygon points="{" ".join(pts)}" fill="{fill}" stroke="{stroke}" stroke-width="1.5"/>'
+    # default: Pin (teardrop)
+    return (
+        f'<path d="M {cx} {cy+r*1.4} C {cx-r*1.2} {cy+r*0.2} {cx-r*1.1} {cy-r*1.3} {cx} {cy-r*1.3} '
+        f'C {cx+r*1.1} {cy-r*1.3} {cx+r*1.2} {cy+r*0.2} {cx} {cy+r*1.4} Z" fill="{fill}" stroke="{stroke}" stroke-width="1.8"/>'
+        f'<circle cx="{cx}" cy="{cy-r*0.5}" r="{r*0.4}" fill="white" opacity="0.85"/>'
+    )
+
+
+def svg_board(size=360):
     cell = size / 15
     parts = [f'<svg viewBox="0 0 {size} {size}" xmlns="http://www.w3.org/2000/svg" style="background:#f4f1e8;">']
 
     def rect(r, c, color, w=1, h=1):
-        parts.append(
-            f'<rect x="{c*cell}" y="{r*cell}" width="{w*cell}" height="{h*cell}" '
-            f'fill="{color}" stroke="#555" stroke-width="0.5"/>'
-        )
+        parts.append(f'<rect x="{c*cell}" y="{r*cell}" width="{w*cell}" height="{h*cell}" fill="{color}" stroke="#555" stroke-width="0.4"/>')
 
-    # base quadrant backgrounds
     quad_origin = {"red": (0, 0), "green": (0, 9), "yellow": (9, 9), "blue": (9, 0)}
     for color, (ro, co) in quad_origin.items():
-        parts.append(
-            f'<rect x="{co*cell}" y="{ro*cell}" width="{6*cell}" height="{6*cell}" '
-            f'fill="{HEX[color]}22" stroke="#999" stroke-width="0.5"/>'
-        )
-        parts.append(
-            f'<rect x="{(co+1)*cell}" y="{(ro+1)*cell}" width="{4*cell}" height="{4*cell}" '
-            f'fill="white" stroke="{HEX[color]}" stroke-width="1.5" rx="6"/>'
-        )
+        parts.append(f'<rect x="{co*cell}" y="{ro*cell}" width="{6*cell}" height="{6*cell}" fill="{HEX[color]}22" stroke="#999" stroke-width="0.4"/>')
+        parts.append(f'<rect x="{(co+1)*cell}" y="{(ro+1)*cell}" width="{4*cell}" height="{4*cell}" fill="white" stroke="{HEX[color]}" stroke-width="1.2" rx="6"/>')
         for (sr, sc) in BASE_SLOTS[color]:
             cx, cy = (sc + 0.5) * cell, (sr + 0.5) * cell
-            parts.append(f'<circle cx="{cx}" cy="{cy}" r="{cell*0.28}" fill="{HEX[color]}33" stroke="{HEX[color]}" stroke-width="0.7"/>')
+            parts.append(f'<circle cx="{cx}" cy="{cy}" r="{cell*0.26}" fill="{HEX[color]}33" stroke="{HEX[color]}" stroke-width="0.6"/>')
 
-    # plain background for the 3x3 middle band and cross arms (path track)
     for gi, (r, c) in enumerate(GLOBAL_CELLS):
-        fill = "#FFFFFF"
-        if gi in SAFE_GLOBAL:
-            fill = "#FFF3B0"
+        fill = "#FFF3B0" if gi in SAFE_GLOBAL else "#FFFFFF"
         rect(r, c, fill)
         if gi in SAFE_GLOBAL:
             cx, cy = (c + 0.5) * cell, (r + 0.5) * cell
-            parts.append(f'<text x="{cx}" y="{cy+4}" font-size="{cell*0.55}" text-anchor="middle">★</text>')
+            parts.append(f'<text x="{cx}" y="{cy+4}" font-size="{cell*0.5}" text-anchor="middle">★</text>')
 
-    # home columns
     for color in COLORS:
         for (r, c) in HOME_COLS[color]:
             rect(r, c, HEX[color] + "cc")
-
-    # start squares slightly emphasised
     for color in COLORS:
         r, c = GLOBAL_CELLS[START_INDEX[color]]
         rect(r, c, HEX[color])
 
-    # center home triangle
-    cx, cy = 7.5 * cell, 7.5 * cell
     tri_colors = [HEX["red"], HEX["green"], HEX["yellow"], HEX["blue"]]
     pts = [
         f"{6*cell},{6*cell} {7.5*cell},{7.5*cell} {6*cell},{9*cell}",
@@ -341,12 +308,10 @@ def svg_board(size=480):
     ]
     for pt, col in zip(pts, tri_colors):
         parts.append(f'<polygon points="{pt}" fill="{col}"/>')
-
-    # outer border
     parts.append(f'<rect x="0" y="0" width="{size}" height="{size}" fill="none" stroke="#222" stroke-width="2"/>')
 
-    # tokens
     g = st.session_state.game
+    shape = st.session_state.get("token_shape", "Pin")
     occupied = {}
     for color in g["colors"]:
         for idx, pos in enumerate(g["positions"][color]):
@@ -359,8 +324,7 @@ def svg_board(size=480):
             offset_x = (k - (n - 1) / 2) * cell * 0.32 if n > 1 else 0
             cx = (c + 0.5) * cell + offset_x
             cy = (r + 0.5) * cell
-            parts.append(f'<circle cx="{cx}" cy="{cy}" r="{cell*0.30}" fill="{HEX[color]}" stroke="{DARK_HEX[color]}" stroke-width="2"/>')
-            parts.append(f'<circle cx="{cx-cell*0.08}" cy="{cy-cell*0.08}" r="{cell*0.08}" fill="#ffffff88"/>')
+            parts.append(token_shape_svg(shape, cx, cy, cell * 0.28, HEX[color], DARK_HEX[color]))
 
     parts.append("</svg>")
     return "".join(parts)
@@ -368,7 +332,7 @@ def svg_board(size=480):
 
 def svg_dice(value, skin_name):
     skin = DICE_SKINS[skin_name]
-    s = 90
+    s = 70
     pip_positions = {
         1: [(0.5, 0.5)],
         2: [(0.25, 0.25), (0.75, 0.75)],
@@ -378,170 +342,170 @@ def svg_dice(value, skin_name):
         6: [(0.25, 0.25), (0.75, 0.25), (0.25, 0.5), (0.75, 0.5), (0.25, 0.75), (0.75, 0.75)],
     }
     parts = [f'<svg viewBox="0 0 {s} {s}" xmlns="http://www.w3.org/2000/svg">']
-    parts.append(f'<rect x="4" y="4" width="{s-8}" height="{s-8}" rx="14" fill="{skin["bg"]}" stroke="{skin["border"]}" stroke-width="4"/>')
+    parts.append(f'<rect x="3" y="3" width="{s-6}" height="{s-6}" rx="12" fill="{skin["bg"]}" stroke="{skin["border"]}" stroke-width="3"/>')
     if value:
         for (px, py) in pip_positions[value]:
-            parts.append(f'<circle cx="{px*s}" cy="{py*s}" r="{s*0.08}" fill="{skin["pip"]}"/>')
+            parts.append(f'<circle cx="{px*s}" cy="{py*s}" r="{s*0.075}" fill="{skin["pip"]}"/>')
     parts.append("</svg>")
     return "".join(parts)
 
 
 # ============================================================
-# SIDEBAR — setup
+# SETUP WIZARD
 # ============================================================
 
-st.sidebar.title("🎲 Ludo Master Setup")
+if "stage" not in st.session_state:
+    st.session_state.stage = "setup"
+    st.session_state.setup_mode = "Classic"
+    st.session_state.setup_count = 4
+    st.session_state.setup_roles = {c: "Human" for c in COLORS}
+    st.session_state.setup_names = {c: c.capitalize() for c in COLORS}
+    st.session_state.dice_skin = "Classic White"
+    st.session_state.token_shape = "Pin"
+    st.session_state.commentary_on = False
+    st.session_state.groq_key = ""
 
-mode_label = st.sidebar.radio(
-    "Game mode",
-    ["Play vs Computer", "Pass & Play (2-4 players, one device)", "Team Up (2v2)"],
-)
-mode_map = {
-    "Play vs Computer": "computer",
-    "Pass & Play (2-4 players, one device)": "local",
-    "Team Up (2v2)": "team",
-}
-mode = mode_map[mode_label]
+if st.session_state.stage == "setup":
+    st.title("👑 LUDO MASTER")
+    st.caption("Choose color, name & mode — then hit Play")
 
-num_local = 4
-if mode == "local":
-    num_local = st.sidebar.slider("Number of players", 2, 4, 4)
+    mode_choice = st.radio("Select game", ["Classic", "Team Up"], horizontal=True,
+                            index=0 if st.session_state.setup_mode == "Classic" else 1)
+    st.session_state.setup_mode = mode_choice
 
-dice_skin = st.sidebar.selectbox("Dice design", list(DICE_SKINS.keys()))
+    if mode_choice == "Classic":
+        st.write("**Players**")
+        c1, c2, c3 = st.columns(3)
+        for col, n in zip([c1, c2, c3], [2, 3, 4]):
+            if col.button(f"{n}P", type="primary" if st.session_state.setup_count == n else "secondary", use_container_width=True):
+                st.session_state.setup_count = n
+        active_colors = {2: TWO_PLAYER_COLORS, 3: THREE_PLAYER_COLORS, 4: FOUR_PLAYER_COLORS}[st.session_state.setup_count]
+    else:
+        active_colors = FOUR_PLAYER_COLORS
+        st.caption("Team Up: 🔴 Red + 🟡 Yellow  vs  🟢 Green + 🔵 Blue")
 
-st.sidebar.markdown("---")
-commentary_on = st.sidebar.checkbox("Enable AI commentary (Groq, optional)", value=False)
-groq_key_input = ""
-if commentary_on:
-    groq_key_input = st.sidebar.text_input(
-        "Groq API key",
-        value=st.secrets.get("GROQ_API_KEY", "") if hasattr(st, "secrets") else "",
-        type="password",
-        help="Get a free key at console.groq.com. Stored only for this session.",
-    )
+    st.write("**Choose color, name & type**")
+    for color in active_colors:
+        cc1, cc2, cc3 = st.columns([1, 2, 1.3])
+        cc1.markdown(f"<div style='width:26px;height:26px;border-radius:50%;background:{HEX[color]};margin-top:6px;'></div>", unsafe_allow_html=True)
+        st.session_state.setup_names[color] = cc2.text_input(
+            "name", value=st.session_state.setup_names[color], key=f"name_{color}", label_visibility="collapsed"
+        )
+        st.session_state.setup_roles[color] = cc3.selectbox(
+            "role", ["Human", "Computer"],
+            index=["Human", "Computer"].index(st.session_state.setup_roles[color]),
+            key=f"role_{color}", label_visibility="collapsed",
+        )
 
-if st.sidebar.button("🔄 Start New Game", type="primary", use_container_width=True):
-    start_new_game(mode, num_local, dice_skin, commentary_on)
-    st.session_state.groq_key = groq_key_input
+    st.write("**Select token style**")
+    st.session_state.token_shape = st.radio("token", TOKEN_SHAPES, horizontal=True,
+                                             index=TOKEN_SHAPES.index(st.session_state.token_shape),
+                                             label_visibility="collapsed")
 
-st.sidebar.markdown("---")
-st.sidebar.caption(
-    "Online matchmaking with strangers isn't included — see the notes below the "
-    "board for why, and what to add if you want real-time online play."
-)
+    st.write("**Select dice design**")
+    st.session_state.dice_skin = st.selectbox("dice", list(DICE_SKINS.keys()),
+                                               index=list(DICE_SKINS.keys()).index(st.session_state.dice_skin),
+                                               label_visibility="collapsed")
+
+    with st.expander("🎙️ Optional: AI commentary (Groq)"):
+        st.session_state.commentary_on = st.checkbox("Enable commentary", value=st.session_state.commentary_on)
+        if st.session_state.commentary_on:
+            st.session_state.groq_key = st.text_input("Groq API key", value=st.session_state.groq_key, type="password")
+
+    if st.button("▶️ Play", type="primary", use_container_width=True):
+        mode = "team" if mode_choice == "Team Up" else "computer" if "Computer" in st.session_state.setup_roles.values() else "local"
+        is_human = {c: (st.session_state.setup_roles[c] == "Human") for c in active_colors}
+        names = {c: (st.session_state.setup_names[c] or c.capitalize()) for c in active_colors}
+        start_new_game(mode, active_colors, names, is_human, st.session_state.dice_skin,
+                        st.session_state.token_shape, st.session_state.commentary_on, st.session_state.groq_key)
+        st.rerun()
 
 # ============================================================
-# INIT
+# GAME SCREEN (compact, one page)
 # ============================================================
 
-if "game" not in st.session_state:
-    start_new_game(mode, num_local, dice_skin, commentary_on)
-    st.session_state.groq_key = groq_key_input
+else:
+    g = st.session_state.game
 
-g = st.session_state.game
+    top_l, top_r = st.columns([3, 1])
+    top_l.markdown("### 👑 Ludo Master")
+    if top_r.button("🔄 New", use_container_width=True):
+        st.session_state.stage = "setup"
+        st.rerun()
 
-# ============================================================
-# MAIN
-# ============================================================
+    winner = check_winner()
+    if winner and not g["winner"]:
+        g["winner"] = winner
+    if g["winner"]:
+        st.success(f"🏆 {g['winner']} wins!")
 
-st.title("👑 LUDO MASTER")
+    st.components.v1.html(f'<div style="max-width:360px;margin:auto;">{svg_board()}</div>', height=370)
 
-winner = check_winner()
-if winner and not g["winner"]:
-    g["winner"] = winner
-
-if g["winner"]:
-    st.success(f"🏆 {g['winner']} wins! Start a new game from the sidebar to play again.")
-
-col_board, col_side = st.columns([2, 1])
-
-with col_board:
-    st.components.v1.html(f'<div style="max-width:480px;margin:auto;">{svg_board()}</div>', height=500)
-
-with col_side:
     turn_color = current_color()
-    st.markdown(f"### Turn: :{('red' if turn_color=='red' else 'green' if turn_color=='green' else 'orange' if turn_color=='yellow' else 'blue')}[{turn_color.upper()}]")
-    if g["mode"] == "team":
-        st.caption(f"Team {TEAM_OF[turn_color]}")
-
-    dice_val = g["dice"]
-    st.components.v1.html(f'<div style="width:90px;margin:auto;">{svg_dice(dice_val, st.session_state.dice_skin)}</div>', height=100)
-
-    is_human_turn = g["is_human"].get(turn_color, True)
     disabled = bool(g["winner"])
 
-    if dice_val is None:
+    row1, row2 = st.columns([1, 1])
+    with row1:
+        st.markdown(f"**Turn:** <span style='color:{HEX[turn_color]};font-weight:800'>{g['names'][turn_color]}</span>", unsafe_allow_html=True)
+        if g["mode"] == "team":
+            st.caption(f"Team {TEAM_OF[turn_color]}")
+    with row2:
+        st.components.v1.html(f'<div style="width:60px;">{svg_dice(g["dice"], st.session_state.dice_skin)}</div>', height=75)
+
+    is_human_turn = g["is_human"].get(turn_color, True)
+
+    if g["dice"] is None:
         if st.button("🎲 Roll Dice", disabled=disabled, use_container_width=True):
             roll = random.randint(1, 6)
             g["dice"] = roll
             g["movable"] = movable_tokens(turn_color, roll)
-
-            if roll == 6:
-                g["consecutive_sixes"] += 1
-            else:
-                g["consecutive_sixes"] = 0
-
+            g["consecutive_sixes"] = g["consecutive_sixes"] + 1 if roll == 6 else 0
             if g["consecutive_sixes"] == 3:
-                g["log"].insert(0, f"{turn_color.capitalize()} rolled three 6's in a row — turn forfeited!")
+                g["log"].insert(0, f"{g['names'][turn_color]} rolled three 6's — turn forfeited!")
                 next_turn()
             elif not g["movable"]:
-                g["log"].insert(0, f"{turn_color.capitalize()} rolled a {roll} but has no valid move.")
-                if roll == 6:
-                    pass  # extra turn even with no move, re-roll allowed
-                    g["dice"] = None
-                else:
+                g["log"].insert(0, f"{g['names'][turn_color]} rolled {roll}, no valid move.")
+                if roll != 6:
                     next_turn()
+                else:
+                    g["dice"] = None
             st.rerun()
     else:
         if is_human_turn:
-            st.write("Choose a token to move:")
-            for idx in g["movable"]:
+            st.write(f"Rolled **{g['dice']}** — choose a token:")
+            btn_cols = st.columns(len(g["movable"])) if g["movable"] else [st]
+            for i, idx in enumerate(g["movable"]):
                 pos = g["positions"][turn_color][idx]
-                label = "Base" if pos == -1 else ("Home!" if pos == FINISH_POS else f"pos {pos}")
-                if st.button(f"Token {idx+1} ({label})", key=f"mv_{idx}", use_container_width=True):
-                    extra = apply_move(turn_color, idx, dice_val)
-                    if st.session_state.get("commentary_on") and st.session_state.get("groq_key"):
-                        c = get_groq_commentary(g["log"][0], st.session_state["groq_key"])
+                label = "Base" if pos == -1 else ("Home!" if pos == FINISH_POS else f"#{pos}")
+                target = btn_cols[i] if g["movable"] else st
+                if target.button(f"T{idx+1}\n{label}", key=f"mv_{idx}", use_container_width=True):
+                    extra = apply_move(turn_color, idx, g["dice"])
+                    if st.session_state.commentary_on and st.session_state.groq_key:
+                        c = get_groq_commentary(g["log"][0], st.session_state.groq_key)
                         if c:
                             g["log"].insert(0, f"🎙️ {c}")
-                    give_extra = extra or (dice_val == 6)
-                    next_turn(give_extra=give_extra)
+                    next_turn(give_extra=(extra or g["dice"] == 6))
                     st.rerun()
         else:
-            st.info("Computer is thinking...")
-            idx = ai_choose_token(turn_color, dice_val, g["movable"])
-            extra = apply_move(turn_color, idx, dice_val)
-            give_extra = extra or (dice_val == 6)
-            next_turn(give_extra=give_extra)
+            st.info(f"{g['names'][turn_color]} (Computer) is thinking...")
+            idx = ai_choose_token(turn_color, g["dice"], g["movable"])
+            extra = apply_move(turn_color, idx, g["dice"])
+            next_turn(give_extra=(extra or g["dice"] == 6))
             st.rerun()
 
-st.markdown("---")
-st.subheader("Game log")
-for line in g["log"][:12]:
-    st.write("• " + line)
+    with st.expander("📜 Game log"):
+        for line in g["log"][:12]:
+            st.write("• " + line)
 
-with st.expander("ℹ️ About the 'Online' and 'Friends' modes"):
-    st.markdown(
-        """
-**Why there's no live online matchmaking here:** Streamlit apps re-run the whole
-script on every interaction and don't keep an open, low-latency connection between
-different users' browsers. That rules out the kind of real-time matchmaking you see
-in the screenshot (168k+ concurrent players, live turns pushed instantly to opponents).
-
-**What Pass & Play / Team Up give you instead:** the full game — 2 to 4 players,
-or 2v2 teams — playable together on one device, taking turns. This is genuinely
-multiplayer, just not remote/real-time.
-
-**If you want true online play later**, the usual path is:
-1. Add a small realtime backend (Firebase Realtime Database / Supabase Realtime,
-   or a lightweight Socket.IO server) that stores the shared game state.
-2. Have this Streamlit app read/write to that backend instead of `st.session_state`,
-   and use `streamlit-autorefresh` (or similar) to poll for the other player's moves
-   every 1-2 seconds.
-3. For truly instant, low-latency play, move the UI off Streamlit entirely to a
-   small React/Flask + WebSocket app — Streamlit isn't built for that.
-
-None of this requires Gemini or Groq — those are language-model APIs, not game
-backends. Your Groq key is only used here for the optional one-line commentary.
-        """
-    )
+    with st.expander("ℹ️ About Online / Friends modes"):
+        st.markdown(
+            "Streamlit re-runs the whole script per interaction and can't hold live "
+            "connections between different users' browsers, so true real-time online "
+            "matchmaking isn't included. Classic and Team Up here are fully multiplayer, "
+            "just on one shared device (pass & play) or vs the built-in bot.\n\n"
+            "For real online play later: add a realtime backend (Firebase/Supabase "
+            "Realtime, or a small Socket.IO server), have this app read/write shared "
+            "state there, and poll for opponent moves with `streamlit-autorefresh`. "
+            "Neither Gemini nor Groq is needed for that — those are language-model "
+            "APIs, used here only for the optional commentary."
+        )
