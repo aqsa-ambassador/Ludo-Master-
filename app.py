@@ -441,12 +441,28 @@ else:
 
     st.components.v1.html(f'<div style="max-width:360px;margin:auto;">{svg_board()}</div>', height=370)
 
+    # ---- player legend: which color belongs to whom ----
     turn_color = current_color()
+    legend_cols = st.columns(len(g["colors"]))
+    for col_widget, c in zip(legend_cols, g["colors"]):
+        tag = "You" if g["is_human"][c] else "Bot"
+        is_turn = (c == turn_color)
+        border = f"2px solid {HEX[c]}" if is_turn else "1px solid #444"
+        bg = f"{HEX[c]}22" if is_turn else "transparent"
+        col_widget.markdown(
+            f"""<div style="border:{border};border-radius:8px;padding:4px 2px;text-align:center;background:{bg};">
+            <div style="width:14px;height:14px;border-radius:50%;background:{HEX[c]};margin:0 auto 2px auto;"></div>
+            <div style="font-size:0.72rem;line-height:1.1;">{g['names'][c]}<br><span style="opacity:0.7;">({tag})</span></div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
     disabled = bool(g["winner"])
 
     row1, row2 = st.columns([1, 1])
     with row1:
-        st.markdown(f"**Turn:** <span style='color:{HEX[turn_color]};font-weight:800'>{g['names'][turn_color]}</span>", unsafe_allow_html=True)
+        my_tag = "You" if g["is_human"][turn_color] else "Bot"
+        st.markdown(f"**Turn:** <span style='color:{HEX[turn_color]};font-weight:800'>{g['names'][turn_color]}</span> <span style='opacity:0.6;'>({my_tag})</span>", unsafe_allow_html=True)
         if g["mode"] == "team":
             st.caption(f"Team {TEAM_OF[turn_color]}")
     with row2:
@@ -454,59 +470,21 @@ else:
 
     is_human_turn = g["is_human"].get(turn_color, True)
 
-    if g["dice"] is None and not g.get("awaiting_continue"):
-        if st.button("🎲 Roll Dice", disabled=disabled, use_container_width=True):
-            roll = random.randint(1, 6)
-            g["dice"] = roll
-            g["movable"] = movable_tokens(turn_color, roll)
-            g["consecutive_sixes"] = g["consecutive_sixes"] + 1 if roll == 6 else 0
-            if g["consecutive_sixes"] == 3:
-                g["log"].insert(0, f"{g['names'][turn_color]} rolled three 6's — turn forfeited!")
-                g["awaiting_continue"] = "forfeit"
-            elif not g["movable"]:
-                g["log"].insert(0, f"{g['names'][turn_color]} rolled {roll}, no valid move.")
-                g["awaiting_continue"] = "extra" if roll == 6 else "pass"
-            st.rerun()
-    elif g.get("awaiting_continue"):
-        reason = g["awaiting_continue"]
-        note = "No valid move — you rolled a 6, roll again." if reason == "extra" else \
-               "Three 6's in a row — turn passes." if reason == "forfeit" else \
-               "No valid move — turn passes."
-        st.caption(note)
-        if is_human_turn:
-            if st.button("➡️ Continue", use_container_width=True):
-                give_extra = (reason == "extra")
-                g["awaiting_continue"] = False
-                next_turn(give_extra=give_extra)
-                st.rerun()
-        else:
-            give_extra = (reason == "extra")
-            g["awaiting_continue"] = False
-            next_turn(give_extra=give_extra)
-            st.rerun()
-    else:
-        if is_human_turn:
-            st.write(f"Rolled **{g['dice']}** — choose a token:")
-            btn_cols = st.columns(len(g["movable"])) if g["movable"] else [st]
-            for i, idx in enumerate(g["movable"]):
-                pos = g["positions"][turn_color][idx]
-                label = "Base" if pos == -1 else ("Home!" if pos == FINISH_POS else f"#{pos}")
-                target = btn_cols[i] if g["movable"] else st
-                if target.button(f"T{idx+1}\n{label}", key=f"mv_{idx}", use_container_width=True):
-                    extra = apply_move(turn_color, idx, g["dice"])
-                    if st.session_state.commentary_on and st.session_state.groq_key:
-                        c = get_groq_commentary(g["log"][0], st.session_state.groq_key)
-                        if c:
-                            g["log"].insert(0, f"🎙️ {c}")
-                    next_turn(give_extra=(extra or g["dice"] == 6))
-                    st.rerun()
-        else:
-            st.info(f"{g['names'][turn_color]} (Computer) is thinking...")
-            idx = ai_choose_token(turn_color, g["dice"], g["movable"])
-            extra = apply_move(turn_color, idx, g["dice"])
-            next_turn(give_extra=(extra or g["dice"] == 6))
-            st.rerun()
+    def do_roll():
+        roll = random.randint(1, 6)
+        g["dice"] = roll
+        g["movable"] = movable_tokens(turn_color, roll)
+        g["consecutive_sixes"] = g["consecutive_sixes"] + 1 if roll == 6 else 0
+        if g["consecutive_sixes"] == 3:
+            g["log"].insert(0, f"{g['names'][turn_color]} rolled three 6's — turn forfeited!")
+            g["awaiting_continue"] = "forfeit"
+        elif not g["movable"]:
+            g["log"].insert(0, f"{g['names'][turn_color]} rolled {roll}, no valid move.")
+            g["awaiting_continue"] = "extra" if roll == 6 else "pass"
 
-    with st.expander("📜 Game log"):
-        for line in g["log"][:12]:
-            st.write("• " + line)
+    if g["dice"] is None and not g.get("awaiting_continue"):
+        if is_human_turn:
+            if st.button("🎲 Roll Dice", disabled=disabled, use_container_width=True):
+                do_roll()
+                st.rerun()
+     
