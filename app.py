@@ -483,8 +483,5 @@ else:
             g["awaiting_continue"] = "extra" if roll == 6 else "pass"
 
     if g["dice"] is None and not g.get("awaiting_continue"):
-        if is_human_turn:
-            if st.button("🎲 Roll Dice", disabled=disabled, use_container_width=True):
-                do_roll()
-                st.rerun()
-     
+        label = "🎲 Roll Dice" if is_human_turn else f"🤖 Roll for {g['names'][turn_color]} (Bot)"
+        if st.button(label, disabled=disabled, use_container_width=True)
