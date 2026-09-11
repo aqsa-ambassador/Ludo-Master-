@@ -10,10 +10,9 @@ st.set_page_config(page_title="Ludo Master", page_icon="🎲", layout="centered"
 st.markdown(
     """
     <style>
-    .block-container {padding-top: 1rem; padding-bottom: 0.5rem; max-width: 460px;}
+    .block-container {padding-top: 0.8rem; padding-bottom: 0.5rem; max-width: 460px;}
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    div[data-testid="stVerticalBlock"] > div:has(> div.stButton) {margin-bottom: -0.6rem;}
     .stButton>button {padding: 0.35rem 0.6rem;}
     h1 {font-size: 1.6rem !important; margin-bottom: 0.2rem !important;}
     h3 {margin-top: 0.2rem !important; margin-bottom: 0.2rem !important;}
@@ -110,6 +109,7 @@ def start_new_game(mode, colors_in_play, names, is_human, dice_skin, token_shape
         "dice": None,
         "movable": [],
         "consecutive_sixes": 0,
+        "awaiting_continue": False,
         "log": [f"Game started. {names[colors_in_play[0]]} ({colors_in_play[0]}) goes first."],
         "winner": None,
     }
@@ -454,7 +454,7 @@ else:
 
     is_human_turn = g["is_human"].get(turn_color, True)
 
-    if g["dice"] is None:
+    if g["dice"] is None and not g.get("awaiting_continue"):
         if st.button("🎲 Roll Dice", disabled=disabled, use_container_width=True):
             roll = random.randint(1, 6)
             g["dice"] = roll
@@ -462,50 +462,31 @@ else:
             g["consecutive_sixes"] = g["consecutive_sixes"] + 1 if roll == 6 else 0
             if g["consecutive_sixes"] == 3:
                 g["log"].insert(0, f"{g['names'][turn_color]} rolled three 6's — turn forfeited!")
-                next_turn()
+                g["awaiting_continue"] = "forfeit"
             elif not g["movable"]:
                 g["log"].insert(0, f"{g['names'][turn_color]} rolled {roll}, no valid move.")
-                if roll != 6:
-                    next_turn()
-                else:
-                    g["dice"] = None
+                g["awaiting_continue"] = "extra" if roll == 6 else "pass"
+            st.rerun()
+    elif g.get("awaiting_continue"):
+        reason = g["awaiting_continue"]
+        note = "No valid move — you rolled a 6, roll again." if reason == "extra" else \
+               "Three 6's in a row — turn passes." if reason == "forfeit" else \
+               "No valid move — turn passes."
+        st.caption(note)
+        if is_human_turn:
+            if st.button("➡️ Continue", use_container_width=True):
+                give_extra = (reason == "extra")
+                g["awaiting_continue"] = False
+                next_turn(give_extra=give_extra)
+                st.rerun()
+        else:
+            give_extra = (reason == "extra")
+            g["awaiting_continue"] = False
+            next_turn(give_extra=give_extra)
             st.rerun()
     else:
         if is_human_turn:
             st.write(f"Rolled **{g['dice']}** — choose a token:")
             btn_cols = st.columns(len(g["movable"])) if g["movable"] else [st]
             for i, idx in enumerate(g["movable"]):
-                pos = g["positions"][turn_color][idx]
-                label = "Base" if pos == -1 else ("Home!" if pos == FINISH_POS else f"#{pos}")
-                target = btn_cols[i] if g["movable"] else st
-                if target.button(f"T{idx+1}\n{label}", key=f"mv_{idx}", use_container_width=True):
-                    extra = apply_move(turn_color, idx, g["dice"])
-                    if st.session_state.commentary_on and st.session_state.groq_key:
-                        c = get_groq_commentary(g["log"][0], st.session_state.groq_key)
-                        if c:
-                            g["log"].insert(0, f"🎙️ {c}")
-                    next_turn(give_extra=(extra or g["dice"] == 6))
-                    st.rerun()
-        else:
-            st.info(f"{g['names'][turn_color]} (Computer) is thinking...")
-            idx = ai_choose_token(turn_color, g["dice"], g["movable"])
-            extra = apply_move(turn_color, idx, g["dice"])
-            next_turn(give_extra=(extra or g["dice"] == 6))
-            st.rerun()
-
-    with st.expander("📜 Game log"):
-        for line in g["log"][:12]:
-            st.write("• " + line)
-
-    with st.expander("ℹ️ About Online / Friends modes"):
-        st.markdown(
-            "Streamlit re-runs the whole script per interaction and can't hold live "
-            "connections between different users' browsers, so true real-time online "
-            "matchmaking isn't included. Classic and Team Up here are fully multiplayer, "
-            "just on one shared device (pass & play) or vs the built-in bot.\n\n"
-            "For real online play later: add a realtime backend (Firebase/Supabase "
-            "Realtime, or a small Socket.IO server), have this app read/write shared "
-            "state there, and poll for opponent moves with `streamlit-autorefresh`. "
-            "Neither Gemini nor Groq is needed for that — those are language-model "
-            "APIs, used here only for the optional commentary."
-        )
+    
