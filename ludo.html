@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ludo Master</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+:root{--p0:#ef4444;--p0l:#fecaca;--p1:#22c55e;--p1l:#bbf7d0;--p2:#eab308;--p2l:#fef08a;--p3:#3b82f6;--p3l:#bfdbfe;}
+*{box-sizing:border-box;}
+body{background:radial-gradient(circle at top,#312e81,#0f172a 70%);font-family:system-ui,sans-serif;min-height:100vh;padding-top:env(safe-area-inset-top,0);padding-bottom:env(safe-area-inset-bottom,0);}
+.board{position:relative;width:min(94vw,560px);aspect-ratio:1;display:grid;grid-template-columns:repeat(15,1fr);grid-template-rows:repeat(15,1fr);background:#f8fafc;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.5);overflow:hidden;border:5px solid #1e293b;}
+.cell{border:1px solid rgba(0,0,0,.06);}
+.yard{border-radius:12px;display:flex;align-items:center;justify-content:center;position:relative;}
+.yard-inner{width:62%;height:62%;background:#fff;border-radius:10px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:6%;padding:8%;}
+.slot{border-radius:50%;background:rgba(0,0,0,.06);}
+.center{display:flex;align-items:center;justify-content:center;background:conic-gradient(var(--p0) 0 90deg,var(--p1) 90deg 180deg,var(--p2) 180deg 270deg,var(--p3) 270deg 360deg);}
+.center span{font-size:1.4rem;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));}
+.star{display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:.6rem;}
+.token{position:absolute;width:6.2%;height:6.2%;border-radius:50%;border:2px solid rgba(0,0,0,.35);box-shadow:0 2px 5px rgba(0,0,0,.5);transition:left .35s cubic-bezier(.4,0,.2,1),top .35s cubic-bezier(.4,0,.2,1);transform:translate(-50%,-50%);z-index:5;display:flex;align-items:center;justify-content:center;}
+.token::after{content:'';width:35%;height:35%;border-radius:50%;background:rgba(255,255,255,.55);}
+.token.movable{cursor:pointer;animation:bounce 1s infinite;z-index:10;box-shadow:0 0 0 4px rgba(255,255,255,.8),0 2px 8px rgba(0,0,0,.6);}
+@keyframes bounce{0%,100%{transform:translate(-50%,-58%);}50%{transform:translate(-50%,-42%);}}
+.dice{width:56px;height:56px;border-radius:14px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:1.6rem;box-shadow:0 6px 16px rgba(0,0,0,.4);cursor:pointer;user-select:none;transition:transform .15s;}
+.dice:active{transform:scale(.9);}
+.dice.rolling{animation:spin .5s linear infinite;}
+@keyframes spin{from{transform:rotate(0deg) scale(1.1);}to{transform:rotate(360deg) scale(1.1);}}
+.logbox{height:130px;overflow-y:auto;font-size:.72rem;}
+.confetti{position:fixed;width:8px;height:14px;top:-20px;animation:fall linear forwards;z-index:100;}
+@keyframes fall{to{transform:translateY(110vh) rotate(720deg);opacity:.3;}}
+select{color:#000;}
+</style>
+</head>
+<body class="text-slate-100 flex flex-col items-center py-6 px-3">
+
+<div id="setup" class="w-full max-w-md bg-slate-800/80 backdrop-blur rounded-2xl p-6 shadow-2xl">
+  <h1 class="text-3xl font-black text-center mb-1 bg-gradient-to-r from-red-400 via-yellow-300 to-blue-400 bg-clip-text text-transparent">🎲 LUDO MASTER</h1>
+  <p class="text-center text-slate-400 text-sm mb-5">Choose 2–4 players to begin</p>
+  <div id="setupRows" class="space-y-3"></div>
+  <button id="startBtn" class="mt-6 w-full py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 font-bold text-lg shadow-lg active:scale-95 transition">Start Game</button>
+  <p id="setupErr" class="text-red-400 text-sm text-center mt-2 hidden">Pick at least 2 active players.</p>
+</div>
+
+<div id="game" class="hidden w-full max-w-5xl flex flex-col lg:flex-row gap-4 items-center lg:items-start justify-center">
+  <div class="board" id="board"></div>
+  <div class="w-full max-w-md bg-slate-800/80 backdrop-blur rounded-2xl p-4 shadow-2xl space-y-3">
+    <div id="turnBanner" class="text-center font-bold text-lg py-2 rounded-lg"></div>
+    <div class="flex items-center justify-center gap-4">
+      <div id="dice" class="dice">🎲</div>
+      <div class="text-sm text-slate-300" id="diceHint">Tap dice to roll</div>
+    </div>
+    <div id="scores" class="grid grid-cols-2 gap-2 text-sm"></div>
+    <div>
+      <div class="text-xs uppercase tracking-wide text-slate-400 mb-1">Game Log</div>
+      <div id="log" class="logbox bg-slate-900/60 rounded-lg p-2 space-y-1"></div>
+    </div>
+    <button id="restartBtn" class="w-full py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm">🔄 New Game</button>
+  </div>
+</div>
+
+<div id="victory" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+  <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-8 text-center shadow-2xl border border-slate-600">
+    <div class="text-5xl mb-3">🏆</div>
+    <div id="victoryText" class="text-2xl font-black mb-4"></div>
+    <button id="playAgainBtn" class="px-6 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 font-bold">Play Again</button>
+  </div>
+</div>
+
+<script>
+const NAMES=['Red','Green','Yellow','Blue'];
+const HEX=['#ef4444','#22c55e','#eab308','#3b82f6'];
+const LIGHT=['#fecaca','#bbf7d0','#fef08a','#bfdbfe'];
+
+function rot(r,c){return [c,14-r];}
+function rotQ(r,c,n){for(let i=0;i<n;i++){[r,c]=rot(r,c);}return [r,c];}
+const pathBase=[[6,1],[6,2],[6,3],[6,4],[6,5],[5,6],[4,6],[3,6],[2,6],[1,6],[0,6],[0,7],[0,8]];
+const homeBase=[[7,1],[7,2],[7,3],[7,4],[7,5]];
+const yardBase=[[1,1],[1,2],[2,1],[2,2]];
+let PATH=[],HOME=[[],[],[],[]],YARD=[[],[],[],[]];
+for(let q=0;q<4;q++){
+  pathBase.forEach(([r,c])=>PATH.push(rotQ(r,c,q)));
+  homeBase.forEach(([r,c])=>HOME[q].push(rotQ(r,c,q)));
+  yardBase.forEach(([r,c])=>YARD[q].push(rotQ(r,c,q)));
+}
+const START=[0,13,26,39];
+const SAFE=new Set([0,8,13,21,26,34,39,47]);
+const FIN_ANCHOR=[[6.5,6.5],[6.5,7.5],[7.5,7.5],[7.5,6.5]];
+const FIN_OFF=[[-.22,-.22],[.22,-.22],[-.22,.22],[.22,.22]];
+
+function globalOf(p,local){return (START[p]+local)%52;}
+function coordFor(p,tIdx,L){
+  if(L===-1) return YARD[p][tIdx];
+  if(L<=50) return PATH[globalOf(p,L)];
+  if(L<=55) return HOME[p][L-51];
+  const a=FIN_ANCHOR[p],o=FIN_OFF[tIdx];
+  return [a[0]+o[0],a[1]+o[1]];
+}
+
+let ST=null;
+
+// ---------- SETUP UI ----------
+const setupRows=document.getElementById('setupRows');
+NAMES.forEach((n,i)=>{
+  const row=document.createElement('div');
+  row.className='flex items-center justify-between bg-slate-700/60 rounded-lg px-3 py-2';
+  row.innerHTML=`<span class="font-semibold" style="color:${HEX[i]}">● ${n}</span>
+    <select data-i="${i}" class="rounded px-2 py-1 text-sm">
+      <option value="off" ${i>1?'':''}>Off</option>
+      <option value="human" ${i===0?'selected':''}>Human</option>
+      <option value="ai" ${i>0?'selected':''}>AI</option>
+    </select>`;
+  setupRows.appendChild(row);
+});
+
+document.getElementById('startBtn').onclick=()=>{
+  const sel=[...setupRows.querySelectorAll('select')].map(s=>s.value);
+  const active=[];
+  sel.forEach((v,i)=>{if(v!=='off') active.push({color:i,type:v});});
+  if(active.length<2){document.getElementById('setupErr').classList.remove('hidden');return;}
+  document.getElementById('setupErr').classList.add('hidden');
+  initGame(active);
+};
+
+// ---------- BOARD RENDER ----------
+const boardEl=document.getElementById('board');
+function buildBoard(){
+  boardEl.innerHTML='';
+  for(let r=0;r<15;r++){
+    for(let c=0;c<15;c++){
+      if(r<6&&c<6){continue;} if(r<6&&c>8){continue;} if(r>8&&c<6){continue;} if(r>8&&c>8){continue;}
+      const div=document.createElement('div');
+      div.className='cell';
+      div.style.gridRow=r+1; div.style.gridColumn=c+1;
+      boardEl.appendChild(div);
+    }
+  }
+  // yards
+  [[0,0],[0,9],[9,9],[9,0]].forEach((pos,i)=>{
+    const y=document.createElement('div');
+    y.className='yard'; y.style.background=LIGHT[i];
+    y.style.gridRow=`${pos[0]+1} / span 6`; y.style.gridColumn=`${pos[1]+1} / span 6`;
+    y.innerHTML='<div class="yard-inner">'+'<div class="slot"></div>'.repeat(4)+'</div>';
+    boardEl.appendChild(y);
+  });
+  // center
+  const cen=document.createElement('div');
+  cen.className='center'; cen.style.gridRow='7 / span 3'; cen.style.gridColumn='7 / span 3';
+  cen.innerHTML='<span>🏠</span>';
+  boardEl.appendChild(cen);
+  // path cells
+  PATH.forEach(([r,c],idx)=>{
+    const d=document.createElement('div');
+    d.className='cell flex items-center justify-center';
+    d.style.gridRow=r+1; d.style.gridColumn=c+1; d.style.background='#fff';
+    const startColor=START.indexOf(idx);
+    if(startColor>-1){d.style.background=LIGHT[startColor];}
+    else if(SAFE.has(idx)){d.innerHTML='<span class="star">★</span>';}
+    boardEl.appendChild(d);
+  });
+  // home columns
+  HOME.forEach((cells,p)=>{
+    cells.forEach(([r,c])=>{
+      const d=document.createElement('div');
+      d.className='cell'; d.style.gridRow=r+1; d.style.gridColumn=c+1; d.style.background=LIGHT[p];
+      boardEl.appendChild(d);
+    });
+  });
+  ST.tokenLayer=document.createElement('div');
+  ST.tokenLayer.style.position='absolute'; ST.tokenLayer.style.inset='0';
+  boardEl.appendChild(ST.tokenLayer);
+}
+
+function renderTokens(){
+  ST.tokenLayer.innerHTML='';
+  const moves = (!ST.winner && ST.dice!=null) ? validMoves(ST.current) : [];
+  ST.players.forEach((pl,pi)=>{
+    pl.tokens.forEach((pos,ti)=>{
+      if(pos===56) return; // finished tokens hidden count only... keep small marker instead
+      const [r,c]=coordFor(pl.color,ti,pos);
+      const el=document.createElement('div');
+      el.className='token';
+      el.style.left=((c+0.5)/15*100)+'%'; el.style.top=((r+0.5)/15*100)+'%';
+      el.style.background=HEX[pl.color];
+      if(pi===ST.current && !ST.winner && moves.includes(ti) && ST.players[ST.current].type==='human'){
+        el.classList.add('movable');
+        el.onclick=()=>playMove(ST.current,ti);
+      }
+      ST.tokenLayer.appendChild(el);
+    });
+    // finished markers
+    for(let ti=0;ti<4;ti++){
+      if(pl.tokens[ti]!==56) continue;
+      const [r,c]=coordFor(pl.color,ti,56);
+      const el=document.createElement('div');
+      el.className='token'; el.style.width='4.5%'; el.style.height='4.5%';
+      el.style.left=((c+0.5)/15*100)+'%'; el.style.top=((r+0.5)/15*100)+'%';
+      el.style.background=HEX[pl.color];
+      ST.tokenLayer.appendChild(el);
+    }
+  });
+}
+
+// ---------- GAME LOGIC ----------
+function initGame(active){
+  ST={
+    players: active.map(a=>({color:a.color,type:a.type,tokens:[-1,-1,-1,-1],homeCount:0})),
+    current:0, dice:null, rolling:false, sixStreak:0, winner:null, tokenLayer:null
+  };
+  document.getElementById('setup').classList.add('hidden');
+  document.getElementById('game').classList.remove('hidden');
+  document.getElementById('victory').classList.add('hidden');
+  buildBoard();
+  renderScores();
+  clearLog();
+  updateTurnBanner();
+  renderTokens();
+  maybeAITurn();
+}
+
+function log(msg){
+  const box=document.getElementById('log');
+  const d=document.createElement('div');
+  d.textContent=msg;
+  box.prepend(d);
+  while(box.children.length>10) box.removeChild(box.lastChild);
+}
+function clearLog(){document.getElementById('log').innerHTML='';}
+
+function renderScores(){
+  const box=document.getElementById('scores');
+  box.innerHTML='';
+  ST.players.forEach((pl,i)=>{
+    const d=document.createElement('div');
+    d.className='rounded-lg px-2 py-1 flex justify-between items-center';
+    d.style.background='rgba(255,255,255,.06)';
+    d.innerHTML=`<span style="color:${HEX[pl.color]}" class="font-semibold">${i===ST.current?'▶ ':''}${NAMES[pl.color]}${pl.type==='ai'?' 🤖':''}</span><span>${pl.homeCount}/4 🏠</span>`;
+    box.appendChild(d);
+  });
+}
+
+function updateTurnBanner(){
+  const pl=ST.players[ST.current];
+  const b=document.getElementById('turnBanner');
+  b.textContent=`${NAMES[pl.color]}'s Turn${pl.type==='ai'?' (AI thinking...)':''}`;
+  b.style.background=HEX[pl.color]+'33'; b.style.color=HEX[pl.color];
+  renderScores();
+}
+
+function validMoves(p){
+  const pl=ST.players[p]; const d=ST.dice; const res=[];
+  if(d==null) return res;
+  pl.tokens.forEach((pos,ti)=>{
+    if(pos===-1){ if(d===6) res.push(ti); }
+    else if(pos<56 && pos+d<=56) res.push(ti);
+  });
+  return res;
+}
+
+const diceEl=document.getElementById('dice');
+diceEl.onclick=()=>{
+  if(ST.winner||ST.rolling) return;
+  if(ST.players[ST.current].type!=='human') return;
+  if(ST.dice!=null) return; // must move first
+  doRoll();
+};
+
+function doRoll(){
+  ST.rolling=true; diceEl.classList.add('rolling');
+  let ticks=0;
+  const iv=setInterval(()=>{
+    diceEl.textContent='⚀⚁⚂⚃⚄⚅'[Math.floor(Math.random()*6)];
+    ticks++;
+    if(ticks>7){
+      clearInterval(iv);
+      const val=1+Math.floor(Math.random()*6);
+      diceEl.classList.remove('rolling');
+      diceEl.textContent='⚀⚁⚂⚃⚄⚅'[val-1];
+      ST.rolling=false;
+      onDiceRolled(val);
+    }
+  },70);
+}
+
+function onDiceRolled(val){
+  ST.dice=val;
+  const p=ST.current;
+  const pl=ST.players[p];
+  if(val===6){ ST.sixStreak++; } else { ST.sixStreak=0; }
+  log(`${NAMES[pl.color]} rolled a ${val}`);
+  if(ST.sixStreak===3){
+    log(`${NAMES[pl.color]} rolled three 6's in a row — turn forfeited!`);
+    ST.dice=null; ST.sixStreak=0;
+    setTimeout(nextTurn,700);
+    return;
+  }
+  const moves=validMoves(p);
+  document.getElementById('diceHint').textContent = pl.type==='human' ? (moves.length? 'Tap a highlighted token' : 'No moves available') : 'AI thinking...';
+  renderTokens();
+  if(moves.length===0){
+    setTimeout(()=>{
+      ST.dice=null;
+      if(val===6){ log(`${NAMES[pl.color]} gets another roll`); maybeAITurn(); }
+      else nextTurn();
+    },800);
+    return;
+  }
+  if(pl.type==='ai'){
+    setTimeout(()=>{ const choice=chooseAIMove(p,moves); playMove(p,choice); },900);
+  }
+}
+
+function chooseAIMove(p,moves){
+  const pl=ST.players[p]; const d=ST.dice;
+  // 1. capture move
+  for(const ti of moves){
+    const pos=pl.tokens[ti]; const newPos=pos===-1?0:pos+d;
+    if(newPos<=50){
+      const g=globalOf(p,newPos);
+      if(!SAFE.has(g)){
+        for(const [qi,q] of ST.players.entries()){
+          if(qi===p) continue;
+          for(let ti2=0;ti2<4;ti2++){
+            const pos2=q.tokens[ti2];
+            if(pos2>=0&&pos2<=50&&globalOf(q.color,pos2)===g) return ti;
+          }
+        }
+      }
+    }
+  }
+  // 2. finish a token
+  for(const ti of moves){ const pos=pl.tokens[ti]; if(pos!==-1 && pos+d===56) return ti; }
+  // 3. bring token out
+  for(const ti of moves){ if(pl.tokens[ti]===-1) return ti; }
+  // 4. advance most progressed token
+  return moves.reduce((best,ti)=> pl.tokens[ti]>pl.tokens[best]?ti:best, moves[0]);
+}
+
+function playMove(p,ti){
+  const pl=ST.players[p]; const d=ST.dice;
+  const pos=pl.tokens[ti];
+  const newPos = pos===-1?0:pos+d;
+  pl.tokens[ti]=newPos;
+  let captured=false;
+  if(newPos<=50){
+    const g=globalOf(p,newPos);
+    if(!SAFE.has(g)){
+      ST.players.forEach((q,qi)=>{
+        if(qi===p) return;
+        q.tokens.forEach((pos2,ti2)=>{
+          if(pos2>=0&&pos2<=50&&globalOf(q.color,pos2)===g){
+            q.tokens[ti2]=-1; captured=true;
+            log(`💥 ${NAMES[pl.color]} captured ${NAMES[q.color]}'s token!`);
+          }
+        });
+      });
+    }
+  }
+  if(newPos===56){
+    pl.homeCount++;
+    log(`🏆 ${NAMES[pl.color]} brought a token home! (${pl.homeCount}/4)`);
+    if(pl.homeCount===4){
+      ST.winner=p;
+      renderTokens(); renderScores();
+      showVictory(pl.color);
+      return;
+    }
+  }
+  const again = d===6;
+  ST.dice=null;
+  renderTokens(); renderScores();
+  if(again){ log(`${NAMES[pl.color]} rolls again!`); maybeAITurn(); }
+  else nextTurn();
+}
+
+function nextTurn(){
+  ST.dice=null; ST.sixStreak=0;
+  ST.current=(ST.current+1)%ST.players.length;
+  updateTurnBanner();
+  document.getElementById('diceHint').textContent = ST.players[ST.current].type==='human' ? 'Tap dice to roll' : 'AI thinking...';
+  renderTokens();
+  maybeAITurn();
+}
+
+function maybeAITurn(){
+  if(ST.winner) return;
+  if(ST.players[ST.current].type==='ai' && ST.dice==null){
+    setTimeout(doRoll,700);
+  }
+}
+
+function showVictory(color){
+  document.getElementById('victoryText').textContent=`${NAMES[color]} Wins the Game!`;
+  document.getElementById('victoryText').style.color=HEX[color];
+  const v=document.getElementById('victory');
+  v.classList.remove('hidden');
+  for(let i=0;i<40;i++){
+    const c=document.createElement('div');
+    c.className='confetti';
+    c.style.left=Math.random()*100+'vw';
+    c.style.background=HEX[Math.floor(Math.random()*4)];
+    c.style.animationDuration=(2+Math.random()*2)+'s';
+    document.body.appendChild(c);
+    setTimeout(()=>c.remove(),4200);
+  }
+}
+
+document.getElementById('restartBtn').onclick=()=>location.reload();
+document.getElementById('playAgainBtn').onclick=()=>location.reload();
+</script>
+</body>
+</html>
